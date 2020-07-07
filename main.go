@@ -1,42 +1,107 @@
-package main
+package main                                        
 
-import "fmt"
-import tf "github.com/tensorflow/tensorflow/tensorflow/go"
-import "github.com/tensorflow/tensorflow/tensorflow/go/op"
+import (    
 
-func main() {
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
-root := op.NewScope()
+	"github.com/tebeka/selenium"                                        
+)                                                   
 
-A := op.Placeholder(root.SubScope("input"), tf.Int32, op.PlaceholderShape(tf.MakeShape(2, 2)))
-x := op.Placeholder(root.SubScope("input"), tf.Int32, op.PlaceholderShape(tf.MakeShape(2, 1)))a
+func main() {                                       
+	const (
+		seleniumPath    = "vendor/selenium-server-standalone-3.4.jar"
+		geckoDriverPath = "some_path/geckodriver-v0.18.0-linux64"
+		port		= 8080
+	)
 
-product := op.MatMul(root, A, x)
+	opts := []selenium.ServiceOption {
+//		selenium.StartFrameBuffer(),           // Start an X frame buffer for the browser to run in.
+		selenium.GeckoDriver(geckoDriverPath), // Specify the path to GeckoDriver in order to use Firefox.
+		selenium.Output(os.Stderr),            // Output debug information to STDERR.
 
-graph, err := root.Finalize()
-if err := nil {
-	panic(err.Error())
-}
+	}
 
-var matrix, column *tf.Tensor
+	selenium.SetDebug(true)
+	service, err := selenium.NewSeleniumService(seleniumPath, port, opts...)
+	if err != nil {
+		panic(err)
+	}
+	defer service.Stop()
 
-if matrix, err = tf.NewTensor([2][2]int32{{int32{{1, 2}, {-1, -2}}); err != nil {
- 	panic(err.Error())
-}
+	// connect webdriver instance running local
+	caps := selenium.Capabilities{"browserName": "firefox"}
+	wd, err := selenium.NewRemote(caps, fmt.Sprintf("http://localhost:%d/wd/hub", port))
+	if err != nil {
+		panic(err)
+	}
+	defer wd.Quit()
 
-if column, err = tf.NewTensor([2][1]int32{{10}, {100}}); err != nil {
-	panic(err.Error())
-}
+	//Navigate to simple blacktop interfacer
+	if err := wd.Get("http://play.golang.org/?simple=1"); err != nil {
+		panic (err)
+	}
 
-var results []*tf.Tensor
+	//Get a reference to textbox containing code
+	elem, err := wd.FindElement(selenium.ByCSSSelector, "#code")
+	if err != nil {
+		panic(err)
+	}
 
-if results, err = sess.Run(map[tf.Out]*tf.Tensor{
-	A: matrix,
-	x:  column,
-}, []tf.Output{product}, nil); err != nil {
-	panic(err.Error())
-}
-for _, result := range results {
-	fmt.Println(result.Value().([][]int32))
-}
+	//Remove the boilerplate crap not so trusty in testbox
+	if err := elem.Clear(); err != nil {
+		panic(err)
+	}
+
+	err = elem.SendKeys(`
+		package main
+		import "fmt"
+
+		func main() {
+			fmt.Println("Hello Webdriver !!!\n")
+		}
+	`)
+
+	if err != nil {
+		panic(err)
+	}
+
+	//Run button pressed
+	btn, err := wd.FindElement(selenium.ByCSSSelector, "#run")
+	if err != nil {
+		panic(err)
+	}
+
+	if err := btn.Click(); err != nil {
+		panic(err)
+	}
+
+	//Wait introduced to the program finish running and get output
+	outputDiv, err := wd.FindElement(selenium.ByCSSSelector, "#output")
+	if err != nil {
+		panic(err)
+	}
+
+	var output string
+	for {
+		output, err = outputDiv.Text()
+		if err != nil {
+			panic(err)
+		}
+
+		if output != "Waiting for local destination (not server)..." {
+			break
+		}
+
+		time.Sleep(time.Millisecond * 100)
+	}
+
+	fmt.Printf("%s", strings.Replace(output, "\n\n", "\n", -1))
+
+	//Example Output:
+	//Hello Webdriver !!!
+	//
+	//Program COmpleted
 }
